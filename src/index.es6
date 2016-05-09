@@ -1,5 +1,4 @@
 import jPath from 'json-path'
-import Queue from 'async-function-queue'
 import equal from 'deep-equal'
   
 // begins listening to specific db, returns path object.
@@ -12,7 +11,6 @@ export default (horizon, store, pathStr, dbname, actionPrefix = 'ENTRY') => {
   const pathObj = {
     path: pathStr,
     dbname: dbname,
-    queue: Queue(1),
     actionPrefix: actionPrefix,
     docs: {},
     db: horizon(dbname),
@@ -21,9 +19,6 @@ export default (horizon, store, pathStr, dbname, actionPrefix = 'ENTRY') => {
 
   listenHorizon(pathObj)
   store.subscribe(e => processNewState(pathObj, store.getState()))
-
-  console.log("Subscription to " + pathStr + " started")
-
   return pathObj
 }
 
@@ -35,49 +30,31 @@ const listenHorizon = (path) => {
 function processNewState(path, state) {
   var docs = jPath.resolve(state, path.path)[0];
 
-  if (docs && docs.length) {
+  if (docs) {
     var diffs = differences(path.docs, docs);
     if(!(diffs.updated.length == 0 && diffs.new.length == 0 && diffs.deleted.length == 0)) {
-      console.log("DIFFS: ",diffs)
 
       const updated = diffs.new.concat(diffs.updated)
       if (updated.length > 0) {
-        path.db.upsert(updated).forEach(
-          (doc) => { console.log("Horizon stored doc", doc) }, 
-            (error) => { console.log("Error storing doc",error) } 
-        )
+        path.db.upsert(updated)
       }
 
-      diffs.deleted.forEach(doc => scheduleRemove(path, doc))
+      diffs.deleted.forEach(doc => path.db.remove(doc))
     };
+
+  path.docs = docs
   }
 }
 
-  function scheduleInsert(path, doc) {
-    console.log('redux->horizon insert', path, doc)
-    path.docs[doc.id] = doc;
-    path.db.store(doc).forEach((doc) => {console.log("Horizon stored doc", doc)}, (error) => {console.error("Error storing doc",doc,error)} )
-  }
-
-  function scheduleRemove(path, doc) {
-    console.log('redux->horizon remove')
-    delete path.docs[doc.id];
-    var db = path.db;
-    path.db.remove(doc).forEach((doc) => {console.log("Horizon removed doc", doc)}, (error) => {console.error("Error removing doc",doc,error)} )
-  }
-
   function propagateDelete(path, doc) {
-    console.log("horizon->redux remove", doc)
     path.store.dispatch({type: "DBDELETE_" + path.actionPrefix, id: doc.id})
   }
 
   function propagateInsert(path, doc) {
-    console.log("horizon->redux inserting", doc)
     path.store.dispatch({type: "DBINSERT_" + path.actionPrefix, doc: doc})
   }
 
   function propagateUpdate(path, doc) {
-    console.log("horizon->redux updating", doc)
     path.store.dispatch({type: "DBUPDATE_" + path.actionPrefix, doc: doc})
   }
 
